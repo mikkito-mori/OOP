@@ -1,43 +1,94 @@
 ﻿"""Модуль игрового поля."""
 
+from core.game_object import GameObject
+from core.mixins import LoggingMixin
+from core.config import GameConfig, BoardConfig
 
-class Board:
-    """Инкапсулирует сетку 3x3 и правила размещения символов."""
 
-    def __init__(self) -> None:
-        self._grid = [[" " for _ in range(3)] for _ in range(3)]
+class Board(LoggingMixin, GameObject):
+    """Игровое поле для игры в крестики-нолики.
 
-    def get_grid(self) -> list:
-        """Получить текущую сетку поля."""
+    Наследует GameObject и LoggingMixin.
+    Реализует протокол Drawable.
+    """
+
+    def __init__(
+        self,
+        game_config: GameConfig | None = None,
+        board_config: BoardConfig | None = None,
+    ):
+        super().__init__(name="Игровое поле")
+        self._game_cfg = game_config if game_config else GameConfig()
+        self._board_cfg = board_config if board_config else BoardConfig()
+        self._size = self._game_cfg.grid_size
+        empty = self._board_cfg.empty_cell
+        # Инициализация пустой сетки
+        self._grid = [[empty for _ in range(self._size)]
+                      for _ in range(self._size)]
+        self.log(f"Инициализировано поле размером {self._size}x{self._size}")
+
+    @property
+    def size(self) -> int:
+        return self._size
+
+    @property
+    def grid(self) -> list[list[str]]:
         return self._grid
 
-    def is_valid_move(self, row: int, col: int) -> bool:
-        """Проверить, свободна ли клетка."""
-        return self._grid[row][col] == " "
+    def get_grid(self) -> list[list[str]]:
+        """Возвращает текущую сетку поля (совместимость с модулем 1)."""
+        return self._grid
 
     def make_move(self, row: int, col: int, symbol: str) -> bool:
-        """Поставить символ в клетку, если она свободна."""
-        if self.is_valid_move(row, col):
-            self._grid[row][col] = symbol
-            return True
-        return False
+        """Сделать ход в указанную клетку."""
+        if not (0 <= row < self._size and 0 <= col < self._size):
+            self.log_warning(f"Ход вне границ поля: ({row}, {col})")
+            return False
+        if self._grid[row][col] != self._board_cfg.empty_cell:
+            msg = f"Попытка занять уже занятую ячейку: ({row}, {col})"
+            self.log_warning(msg)
+            return False
 
-    def is_full(self) -> bool:
-        """Проверить, заполнено ли все поле."""
-        return all(cell != " " for row in self._grid for cell in row)
+        self._grid[row][col] = symbol
+        self._board_cfg.history.append((row, col, symbol))
+        self.log(f"Ход {symbol} совершен в ячейку ({row}, {col})")
+        return True
 
     def check_winner(self) -> str | None:
-        """Проверить победу. Возвращает "X", "O" или None."""
+        """Проверка наличия победителя."""
         lines = []
-        for i in range(3):
+        # Собираем строки и столбцы
+        for i in range(self._size):
             lines.append(self._grid[i])
-            col = [self._grid[0][i], self._grid[1][i], self._grid[2][i]]
-            lines.append(col)
+            lines.append([self._grid[j][i] for j in range(self._size)])
 
-        lines.append([self._grid[0][0], self._grid[1][1], self._grid[2][2]])
-        lines.append([self._grid[0][2], self._grid[1][1], self._grid[2][0]])
+        # Главная и побочная диагонали
+        lines.append([self._grid[i][i] for i in range(self._size)])
+        anti_diag = [self._grid[i][self._size - 1 - i]
+                     for i in range(self._size)]
+        lines.append(anti_diag)
 
+        win_len = self._game_cfg.win_length
+        empty = self._board_cfg.empty_cell
         for line in lines:
-            if line[0] != " " and line[0] == line[1] == line[2]:
-                return line[0]
+            first = line[0]
+            if first != empty and all(c == first for c in line[:win_len]):
+                self.log(f"Победитель обнаружен: {first}")
+                return first
         return None
+
+    def is_full(self) -> bool:
+        """Проверка, заполнено ли все поле."""
+        empty = self._board_cfg.empty_cell
+        return all(c != empty for row in self._grid for c in row)
+
+    def update(self, dt: float) -> None:
+        """Обновление состояния доски (контракт GameObject)."""
+        # Пока обновлять нечего, логика статична
+        pass
+
+    def draw(self) -> str:
+        """Отрисовка игрового поля в строку (контракт GameObject)."""
+        rows = [" | ".join(row) for row in self._grid]
+        sep = "\n" + "-" * (self._size * 4 - 3) + "\n"
+        return sep.join(rows)
